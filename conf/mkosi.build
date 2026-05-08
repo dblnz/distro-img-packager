@@ -2,7 +2,16 @@
 set -euo pipefail
 
 # Find the CentOS kernel config from kernel-devel
-CENTOS_CONFIG=$(ls /usr/src/kernels/*/.config | head -1)
+# In mkosi sandbox the image root is mounted at /buildroot
+CENTOS_CONFIG=$(find /buildroot/usr/src/kernels /usr/src/kernels /buildroot/usr/lib/modules /usr/lib/modules -maxdepth 3 -name '.config' -print -quit 2>/dev/null || true)
+if [[ -z "$CENTOS_CONFIG" ]]; then
+  echo "ERROR: Could not find kernel .config from kernel-devel package"
+  echo "Searching for .config files:"
+  find / -name '.config' -path '*/kernel*' 2>/dev/null || true
+  find /usr/src -type f 2>/dev/null | head -20 || true
+  find /usr/lib/modules -type f -name '.config' 2>/dev/null || true
+  exit 1
+fi
 echo "Using base config: $CENTOS_CONFIG"
 
 cd "$SRCDIR"

@@ -33,17 +33,37 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Cache apt packages
+      uses: actions/cache@v4
+      id: apt-cache
+      with:
+        path: /var/cache/apt/archives/*.deb
+        key: apt-${{ runner.os }}-qemu-utils-jq-dnf
+
     - name: Install dependencies
       shell: bash
       run: |
         sudo apt-get update
-        sudo apt-get install -y qemu-utils jq
+        sudo apt-get install -y qemu-utils jq dnf
+
+    - name: Cache uv and mkosi
+      uses: actions/cache@v4
+      id: uv-cache
+      with:
+        path: |
+          ~/.local/bin/uv
+          ~/.local/bin/uvx
+          ~/.local/share/uv
+        key: uv-mkosi-${{ runner.os }}
 
     - name: Install uv
+      if: steps.uv-cache.outputs.cache-hit != 'true'
       shell: bash
-      run: |
-        curl -LsSf https://astral.sh/uv/install.sh | sh
-        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+    - name: Add uv to PATH
+      shell: bash
+      run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
     - name: Build raw image
       shell: bash
@@ -52,7 +72,7 @@ runs:
         KERNEL_DIR: ${{ github.workspace }}/${{ inputs.kernel_dir }}
         KERNEL_EXTRA_CONFIG: ${{ github.workspace }}/${{ inputs.kernel_extra_config }}
       run: |
-        uv tool run \
+        sudo -E "$HOME/.local/bin/uv" tool run \
           --from git+https://github.com/systemd/mkosi.git#9a28ad20bbea61894ea7b971d318a71f4374cf3b \
           mkosi --force
 
