@@ -19,6 +19,9 @@ cd "$SRCDIR"
 # Copy CentOS config as base
 cp "$CENTOS_CONFIG" .config
 
+# Disable SBAT (requires external kernel.sbat file not present in our build)
+scripts/config --disable CONFIG_EFI_SBAT_FILE
+
 # Merge extra kernel config if provided
 if [[ -n "${KERNEL_EXTRA_CONFIG:-}" && -f "$KERNEL_EXTRA_CONFIG" ]]; then
   cp "$KERNEL_EXTRA_CONFIG" arch/x86/configs/extra_defconfig
