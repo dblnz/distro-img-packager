@@ -1,0 +1,28 @@
+#!/bin/bash
+set -euo pipefail
+
+# Find the CentOS kernel config from kernel-devel
+CENTOS_CONFIG=$(ls /usr/src/kernels/*/.config | head -1)
+echo "Using base config: $CENTOS_CONFIG"
+
+cd "$SRCDIR"
+
+# Copy CentOS config as base
+cp "$CENTOS_CONFIG" .config
+
+# Merge extra kernel config if provided
+if [[ -n "${KERNEL_EXTRA_CONFIG:-}" && -f "$KERNEL_EXTRA_CONFIG" ]]; then
+  cp "$KERNEL_EXTRA_CONFIG" arch/x86/configs/extra_defconfig
+  scripts/kconfig/merge_config.sh -m .config arch/x86/configs/extra_defconfig
+fi
+
+# Resolve any new dependencies
+make olddefconfig
+
+# Build
+make bzImage -j"$(nproc)"
+make modules -j"$(nproc)"
+
+# Install modules and kernel to $DESTDIR
+make modules_install INSTALL_MOD_PATH="$DESTDIR"
+make install INSTALL_PATH="$DESTDIR/boot"

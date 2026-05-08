@@ -1,0 +1,70 @@
+name: Distro image creator
+description: Package kernel and modules in distro image
+
+inputs:
+  kernel_dir:
+    description: Path to kernel source tree (relative to workspace)
+    required: true
+  kernel_extra_config:
+    description: Path to additional kernel config fragment (relative to workspace)
+    required: false
+    default: ""
+  distro:
+    description: Distribution base
+    required: false
+    default: "centos"
+    type: choice
+    options:
+      - centos
+  output_name:
+    description: Base filename for output image (without extension)
+    required: false
+    default: "image"
+  extra_packages:
+    description: Additional packages to install in the image (space-separated)
+    required: false
+    default: ""
+
+outputs:
+  image_path:
+    description: Path to the generated VHD image file
+    value: ${{ github.workspace }}/${{ inputs.output_name }}.vhd
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install dependencies
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y qemu-utils jq
+
+    - name: Install uv
+      shell: bash
+      run: |
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+    - name: Build raw image
+      shell: bash
+      working-directory: ${{ github.action_path }}/conf
+      env:
+        KERNEL_DIR: ${{ github.workspace }}/${{ inputs.kernel_dir }}
+        KERNEL_EXTRA_CONFIG: ${{ github.workspace }}/${{ inputs.kernel_extra_config }}
+      run: |
+        uv tool run \
+          --from git+https://github.com/systemd/mkosi.git#9a28ad20bbea61894ea7b971d318a71f4374cf3b \
+          mkosi --force
+
+    - name: Resize image
+      shell: bash
+      working-directory: ${{ github.action_path }}/conf
+      run: bash "${{ github.action_path }}/resize.sh"
+
+    - name: Convert to VHD
+      shell: bash
+      working-directory: ${{ github.action_path }}/conf
+      run: |
+        qemu-img convert -f raw -o subformat=fixed,force_size -O vpc \
+          image.raw \
+          "${{ github.workspace }}/${{ inputs.output_name }}.vhd"
