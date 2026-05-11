@@ -9,7 +9,9 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on:
+      - "self-hosted"
+      - "fedora"
     steps:
       - name: Checkout action
         uses: actions/checkout@v4

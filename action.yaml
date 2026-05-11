@@ -33,18 +33,17 @@ outputs:
 runs:
   using: "composite"
   steps:
-    - name: Cache apt packages
+    - name: Cache dnf packages
       uses: actions/cache@v4
-      id: apt-cache
+      id: dnf-cache
       with:
-        path: /var/cache/apt/archives/*.deb
-        key: apt-${{ runner.os }}-qemu-utils-jq-dnf
+        path: /var/cache/dnf
+        key: dnf-${{ runner.os }}-qemu-img-jq
 
     - name: Install dependencies
       shell: bash
       run: |
-        sudo apt-get update
-        sudo apt-get install -y qemu-utils jq dnf
+        sudo dnf install -y qemu-img jq distribution-gpg-keys
 
     - name: Cache uv and mkosi
       uses: actions/cache@v4
