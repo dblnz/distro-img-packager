@@ -32,10 +32,11 @@ runs:
     - name: Install build dependencies
       shell: bash
       run: |
-        sudo dnf install -y \
-          kernel-devel gcc make flex bison \
-          openssl-devel elfutils-libelf-devel \
-          bc perl diffutils git
+        sudo apt-get update
+        sudo apt-get install -y \
+          gcc make flex bison \
+          libssl-dev libelf-dev \
+          bc perl diffutils git ccache
 
     - name: Build kernel
       shell: bash

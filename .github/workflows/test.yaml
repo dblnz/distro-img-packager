@@ -11,10 +11,15 @@ jobs:
   build:
     runs-on:
       - "self-hosted"
-      - "centos"
+      - "ubuntu"
     steps:
       - name: Checkout action
         uses: actions/checkout@v4
+
+      - name: Install QEMU for boot test
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 qemu-utils
 
       - name: Cache kernel source
         uses: actions/cache@v4

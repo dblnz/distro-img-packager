@@ -29,7 +29,12 @@ runs:
     - name: Install image build dependencies
       shell: bash
       run: |
-        sudo dnf install -y qemu-img jq distribution-gpg-keys
+        sudo apt-get update
+        sudo apt-get install -y dnf qemu-utils jq
+
+    - name: Disable AppArmor userns restriction
+      shell: bash
+      run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
     - name: Cache uv and mkosi
       uses: actions/cache@v4
@@ -56,15 +61,15 @@ runs:
       uses: actions/cache@v4
       with:
         path: |
-          /var/tmp/mkosi-cache
-          /var/tmp/mkosi-imgbuild/mkosi.tools
-          /var/tmp/mkosi-pkgcache
+          ${{ github.workspace }}/imgbuild/mkosi.cache
+          ${{ github.workspace }}/imgbuild/mkosi.tools
+          ${{ github.workspace }}/imgbuild/mkosi.pkgcache
         key: mkosi-${{ inputs.distro }}-${{ runner.os }}
 
-    - name: Prepare persistent build directory
+    - name: Prepare build directory
       shell: bash
       env:
-        MKOSI_BUILD_DIR: /var/tmp/mkosi-imgbuild
+        MKOSI_BUILD_DIR: ${{ github.workspace }}/imgbuild
         CONF_SRC: ${{ github.action_path }}/conf
       run: |
         mkdir -p "$MKOSI_BUILD_DIR"
@@ -72,7 +77,7 @@ runs:
 
     - name: Build raw image
       shell: bash
-      working-directory: /var/tmp/mkosi-imgbuild
+      working-directory: ${{ github.workspace }}/imgbuild
       env:
         KERNEL_INSTALL_DIR: ${{ inputs.kernel_dir }}
       run: |
@@ -82,12 +87,12 @@ runs:
 
     - name: Resize image
       shell: bash
-      working-directory: /var/tmp/mkosi-imgbuild
+      working-directory: ${{ github.workspace }}/imgbuild
       run: bash "${{ github.action_path }}/resize.sh"
 
     - name: Convert to VHD
       shell: bash
-      working-directory: /var/tmp/mkosi-imgbuild
+      working-directory: ${{ github.workspace }}/imgbuild
       run: |
         qemu-img convert -f raw -o subformat=fixed,force_size -O vpc \
           image.raw \
