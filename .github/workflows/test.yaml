@@ -21,8 +21,11 @@ jobs:
         id: build
         with:
           kernel_branch: "v7.0.4"
-          kernel_config: "test-kernel-extra.config"
           custom_label: "test"
+          kernel_config: "test-kernel-extra.config"
+          kernel_config_extra: |
+            # CONFIG_EFI_SBAT_FILE is not set
+            # CONFIG_DEBUG_INFO is not set
 
       - name: Verify output
         run: |

@@ -14,6 +14,10 @@ inputs:
     description: Path to kernel config fragment merged on top of the base config (relative to workspace)
     required: false
     default: ""
+  kernel_config_extra:
+    description: Inline kernel config options (highest priority, merged last). One CONFIG_* per line.
+    required: false
+    default: ""
   distro:
     description: Distribution base
     required: false
@@ -65,6 +69,8 @@ runs:
     - name: Build kernel
       shell: bash
       working-directory: linux
+      env:
+        KERNEL_CONFIG_EXTRA: ${{ inputs.kernel_config_extra }}
       run: |
         # Generate base config
         CENTOS_CONFIG=$(find /usr/src/kernels -maxdepth 2 -name '.config' -print -quit 2>/dev/null || true)
@@ -89,8 +95,15 @@ runs:
           scripts/kconfig/merge_config.sh -m .config "${{ github.workspace }}/${{ inputs.kernel_config }}"
         fi
 
-        # Disable SBAT
-        scripts/config --disable CONFIG_EFI_SBAT_FILE
+        # Merge inline config options (highest priority)
+        if [[ -n "$KERNEL_CONFIG_EXTRA" ]]; then
+          INLINE_FRAGMENT=$(mktemp)
+          trap 'rm -f "$INLINE_FRAGMENT"' EXIT
+          printf '%s\n' "$KERNEL_CONFIG_EXTRA" > "$INLINE_FRAGMENT"
+          scripts/kconfig/merge_config.sh -m .config "$INLINE_FRAGMENT"
+          rm -f "$INLINE_FRAGMENT"
+          trap - EXIT
+        fi
 
         make olddefconfig
 
@@ -129,9 +142,11 @@ runs:
         key: uv-mkosi-${{ runner.os }}
 
     - name: Install uv
-      if: steps.uv-cache.outputs.cache-hit != 'true'
       shell: bash
-      run: curl -LsSf https://astral.sh/uv/install.sh | sh
+      run: |
+        if ! command -v uv &>/dev/null && [[ ! -x "$HOME/.local/bin/uv" ]]; then
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+        fi
 
     - name: Add uv to PATH
       shell: bash
