@@ -1,40 +1,20 @@
 #!/bin/bash
 set -euo pipefail
 
-# Find the CentOS kernel config from kernel-devel
-# In mkosi sandbox the image root is mounted at /buildroot
-CENTOS_CONFIG=$(find /buildroot/usr/src/kernels /usr/src/kernels /buildroot/usr/lib/modules /usr/lib/modules -maxdepth 3 -name '.config' -print -quit 2>/dev/null || true)
-if [[ -z "$CENTOS_CONFIG" ]]; then
-  echo "ERROR: Could not find kernel .config from kernel-devel package"
-  echo "Searching for .config files:"
-  find / -name '.config' -path '*/kernel*' 2>/dev/null || true
-  find /usr/src -type f 2>/dev/null | head -20 || true
-  find /usr/lib/modules -type f -name '.config' 2>/dev/null || true
+# Install pre-built kernel and modules from /kernel-install (bind-mounted via --build-sources)
+KERNEL_SRC="/kernel-install"
+
+if [[ ! -d "$KERNEL_SRC/boot" ]] || [[ ! -d "$KERNEL_SRC/lib/modules" ]]; then
+  echo "ERROR: Pre-built kernel not found at $KERNEL_SRC"
+  echo "Expected $KERNEL_SRC/boot/ and $KERNEL_SRC/lib/modules/"
+  ls -la "$KERNEL_SRC" 2>/dev/null || echo "Directory does not exist"
   exit 1
 fi
-echo "Using base config: $CENTOS_CONFIG"
 
-cd "$SRCDIR"
+# Copy kernel image and related files
+mkdir -p "$DESTDIR/boot"
+cp -a "$KERNEL_SRC/boot/"* "$DESTDIR/boot/"
 
-# Copy CentOS config as base
-cp "$CENTOS_CONFIG" .config
-
-# Disable SBAT (requires external kernel.sbat file not present in our build)
-scripts/config --disable CONFIG_EFI_SBAT_FILE
-
-# Merge extra kernel config if provided
-if [[ -n "${KERNEL_EXTRA_CONFIG:-}" && -f "$KERNEL_EXTRA_CONFIG" ]]; then
-  cp "$KERNEL_EXTRA_CONFIG" arch/x86/configs/extra_defconfig
-  scripts/kconfig/merge_config.sh -m .config arch/x86/configs/extra_defconfig
-fi
-
-# Resolve any new dependencies
-make olddefconfig
-
-# Build
-make bzImage -j"$(nproc)"
-make modules -j"$(nproc)"
-
-# Install modules and kernel to $DESTDIR
-make modules_install INSTALL_MOD_PATH="$DESTDIR"
-make install INSTALL_PATH="$DESTDIR/boot"
+# Copy modules
+mkdir -p "$DESTDIR/lib/modules"
+cp -a "$KERNEL_SRC/lib/modules/"* "$DESTDIR/lib/modules/"

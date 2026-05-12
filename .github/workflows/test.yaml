@@ -11,20 +11,18 @@ jobs:
   build:
     runs-on:
       - "self-hosted"
-      - "fedora"
+      - "centos"
     steps:
       - name: Checkout action
         uses: actions/checkout@v4
 
-      - name: Checkout kernel sources
-        run: |
-          git clone --depth 1 --branch v7.0.4 https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git linux
-
-      - name: Build image
+      - name: Build kernel and image
         uses: ./
         id: build
         with:
-          kernel_dir: linux
+          kernel_branch: "v7.0.4"
+          kernel_config: "test-kernel-extra.config"
+          custom_label: "test"
 
       - name: Verify output
         run: |

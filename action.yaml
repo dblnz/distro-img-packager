@@ -1,25 +1,31 @@
-name: Distro image creator
-description: Package kernel and modules in distro image
+name: Kernel and distro image builder
+description: Build kernel from source and package in distro image
 
 inputs:
-  kernel_dir:
-    description: Path to kernel source tree (relative to workspace)
-    required: true
-  kernel_extra_config:
-    description: Path to additional kernel config fragment (relative to workspace)
+  kernel_git_url:
+    description: Git URL for kernel source
+    required: false
+    default: "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git"
+  kernel_branch:
+    description: Kernel git branch/tag to build
+    required: false
+    default: "v7.0.4"
+  kernel_config:
+    description: Path to kernel config file (relative to workspace)
     required: false
     default: ""
   distro:
     description: Distribution base
     required: false
     default: "centos"
-    type: choice
-    options:
-      - centos
   output_name:
     description: Base filename for output image (without extension)
     required: false
     default: "image"
+  custom_label:
+    description: Custom label appended to the kernel version string
+    required: false
+    default: ""
   extra_packages:
     description: Additional packages to install in the image (space-separated)
     required: false
@@ -33,17 +39,84 @@ outputs:
 runs:
   using: "composite"
   steps:
-    - name: Cache dnf packages
+    - name: Cache kernel source
       uses: actions/cache@v4
-      id: dnf-cache
+      id: kernel-cache
       with:
-        path: /var/cache/dnf
-        key: dnf-${{ runner.os }}-qemu-img-jq
+        path: linux
+        key: kernel-${{ inputs.kernel_git_url }}-${{ inputs.kernel_branch }}
 
-    - name: Install dependencies
+    - name: Install build dependencies
       shell: bash
       run: |
-        sudo dnf install -y qemu-img jq distribution-gpg-keys
+        sudo dnf install -y \
+          kernel-devel gcc make flex bison \
+          openssl-devel elfutils-libelf-devel \
+          bc perl diffutils git \
+          qemu-img jq distribution-gpg-keys
+
+    - name: Clone kernel source
+      if: steps.kernel-cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        git clone --depth 1 --branch "${{ inputs.kernel_branch }}" \
+          "${{ inputs.kernel_git_url }}" linux
+
+    - name: Build kernel
+      shell: bash
+      working-directory: linux
+      run: |
+        # Use provided config or generate default
+        if [[ -n "${{ inputs.kernel_config }}" && -f "${{ github.workspace }}/${{ inputs.kernel_config }}" ]]; then
+          cp "${{ github.workspace }}/${{ inputs.kernel_config }}" .config
+        else
+          # Use CentOS kernel-devel config as base
+          CENTOS_CONFIG=$(find /usr/src/kernels -maxdepth 2 -name '.config' -print -quit 2>/dev/null || true)
+          if [[ -z "$CENTOS_CONFIG" ]]; then
+            CENTOS_CONFIG=$(find /usr/src/kernels -maxdepth 2 -name 'Makefile' -print -quit 2>/dev/null || true)
+            if [[ -n "$CENTOS_CONFIG" ]]; then
+              KDIR=$(dirname "$CENTOS_CONFIG")
+              make O=. KCONFIG_ALLCONFIG="$KDIR/.config" alldefconfig 2>/dev/null || \
+                cp "$KDIR/.config" .config 2>/dev/null || true
+            fi
+          else
+            cp "$CENTOS_CONFIG" .config
+          fi
+
+          # Fallback: generate default config if no CentOS config found
+          if [[ ! -f .config ]]; then
+            make defconfig
+          fi
+        fi
+
+        # Disable SBAT
+        scripts/config --disable CONFIG_EFI_SBAT_FILE
+
+        make olddefconfig
+
+        # Annotate kernel version: {version}-<actor>-<label>-<commit_hash>
+        COMMIT_SHORT="${{ github.sha }}"
+        COMMIT_SHORT="${COMMIT_SHORT:0:7}"
+        LABEL_PARTS="${{ github.actor }}"
+        if [[ -n "${{ inputs.custom_label }}" ]]; then
+          LABEL_PARTS="${LABEL_PARTS}-${{ inputs.custom_label }}"
+        fi
+        LOCALVERSION="-${LABEL_PARTS}-${COMMIT_SHORT}"
+        scripts/config --set-str CONFIG_LOCALVERSION "$LOCALVERSION"
+        make olddefconfig
+
+        # disable build timestamp for reproducible builds and ccache efficiency
+        export KBUILD_BUILD_TIMESTAMP=""
+        make CC="ccache gcc" bzImage -j"$(nproc)"
+        make CC="ccache gcc" modules -j"$(nproc)"
+
+    - name: Install kernel to staging directory
+      shell: bash
+      working-directory: linux
+      run: |
+        mkdir -p "${{ github.workspace }}/kernel-install"
+        make modules_install INSTALL_MOD_PATH="${{ github.workspace }}/kernel-install"
+        make install INSTALL_PATH="${{ github.workspace }}/kernel-install/boot" INSTALLKERNEL=no
 
     - name: Cache uv and mkosi
       uses: actions/cache@v4
@@ -68,12 +141,11 @@ runs:
       shell: bash
       working-directory: ${{ github.action_path }}/conf
       env:
-        KERNEL_DIR: ${{ github.workspace }}/${{ inputs.kernel_dir }}
-        KERNEL_EXTRA_CONFIG: ${{ github.workspace }}/${{ inputs.kernel_extra_config }}
+        KERNEL_INSTALL_DIR: ${{ github.workspace }}/kernel-install
       run: |
-        sudo -E "$HOME/.local/bin/uv" tool run \
+        "$HOME/.local/bin/uv" tool run \
           --from git+https://github.com/systemd/mkosi.git#9a28ad20bbea61894ea7b971d318a71f4374cf3b \
-          mkosi --force
+          mkosi --force --build-sources="$KERNEL_INSTALL_DIR:/kernel-install"
 
     - name: Resize image
       shell: bash
