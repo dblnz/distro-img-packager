@@ -61,15 +61,15 @@ runs:
       uses: actions/cache@v4
       with:
         path: |
-          ${{ github.workspace }}/imgbuild/mkosi.cache
-          ${{ github.workspace }}/imgbuild/mkosi.tools
-          ${{ github.workspace }}/imgbuild/mkosi.pkgcache
+          ${{ github.workspace }}/../imgbuild/mkosi.cache
+          ${{ github.workspace }}/../imgbuild/mkosi.tools
+          ${{ github.workspace }}/../imgbuild/mkosi.pkgcache
         key: mkosi-${{ inputs.distro }}-${{ runner.os }}
 
     - name: Prepare build directory
       shell: bash
       env:
-        MKOSI_BUILD_DIR: ${{ github.workspace }}/imgbuild
+        MKOSI_BUILD_DIR: ${{ github.workspace }}/../imgbuild
         CONF_SRC: ${{ github.action_path }}/conf
       run: |
         mkdir -p "$MKOSI_BUILD_DIR"
@@ -77,7 +77,7 @@ runs:
 
     - name: Build raw image
       shell: bash
-      working-directory: ${{ github.workspace }}/imgbuild
+      working-directory: ${{ github.workspace }}/../imgbuild
       env:
         KERNEL_INSTALL_DIR: ${{ inputs.kernel_dir }}
       run: |
@@ -87,12 +87,12 @@ runs:
 
     - name: Resize image
       shell: bash
-      working-directory: ${{ github.workspace }}/imgbuild
+      working-directory: ${{ github.workspace }}/../imgbuild
       run: bash "${{ github.action_path }}/resize.sh"
 
     - name: Convert to VHD
       shell: bash
-      working-directory: ${{ github.workspace }}/imgbuild
+      working-directory: ${{ github.workspace }}/../imgbuild
       run: |
         qemu-img convert -f raw -o subformat=fixed,force_size -O vpc \
           image.raw \
