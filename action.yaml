@@ -11,7 +11,7 @@ inputs:
     required: false
     default: "v7.0.4"
   kernel_config:
-    description: Path to kernel config file (relative to workspace)
+    description: Path to kernel config fragment merged on top of the base config (relative to workspace)
     required: false
     default: ""
   distro:
@@ -66,27 +66,27 @@ runs:
       shell: bash
       working-directory: linux
       run: |
-        # Use provided config or generate default
-        if [[ -n "${{ inputs.kernel_config }}" && -f "${{ github.workspace }}/${{ inputs.kernel_config }}" ]]; then
-          cp "${{ github.workspace }}/${{ inputs.kernel_config }}" .config
+        # Generate base config
+        CENTOS_CONFIG=$(find /usr/src/kernels -maxdepth 2 -name '.config' -print -quit 2>/dev/null || true)
+        if [[ -z "$CENTOS_CONFIG" ]]; then
+          CENTOS_CONFIG=$(find /usr/src/kernels -maxdepth 2 -name 'Makefile' -print -quit 2>/dev/null || true)
+          if [[ -n "$CENTOS_CONFIG" ]]; then
+            KDIR=$(dirname "$CENTOS_CONFIG")
+            make O=. KCONFIG_ALLCONFIG="$KDIR/.config" alldefconfig 2>/dev/null || \
+              cp "$KDIR/.config" .config 2>/dev/null || true
+          fi
         else
-          # Use CentOS kernel-devel config as base
-          CENTOS_CONFIG=$(find /usr/src/kernels -maxdepth 2 -name '.config' -print -quit 2>/dev/null || true)
-          if [[ -z "$CENTOS_CONFIG" ]]; then
-            CENTOS_CONFIG=$(find /usr/src/kernels -maxdepth 2 -name 'Makefile' -print -quit 2>/dev/null || true)
-            if [[ -n "$CENTOS_CONFIG" ]]; then
-              KDIR=$(dirname "$CENTOS_CONFIG")
-              make O=. KCONFIG_ALLCONFIG="$KDIR/.config" alldefconfig 2>/dev/null || \
-                cp "$KDIR/.config" .config 2>/dev/null || true
-            fi
-          else
-            cp "$CENTOS_CONFIG" .config
-          fi
+          cp "$CENTOS_CONFIG" .config
+        fi
 
-          # Fallback: generate default config if no CentOS config found
-          if [[ ! -f .config ]]; then
-            make defconfig
-          fi
+        # Fallback: generate default config if no CentOS config found
+        if [[ ! -f .config ]]; then
+          make defconfig
+        fi
+
+        # Merge user-provided config fragment on top of base config
+        if [[ -n "${{ inputs.kernel_config }}" && -f "${{ github.workspace }}/${{ inputs.kernel_config }}" ]]; then
+          scripts/kconfig/merge_config.sh -m .config "${{ github.workspace }}/${{ inputs.kernel_config }}"
         fi
 
         # Disable SBAT
@@ -143,6 +143,7 @@ runs:
         path: |
           /var/tmp/mkosi-cache
           /var/tmp/mkosi-tools
+          /var/tmp/mkosi-pkgcache
         key: mkosi-${{ inputs.distro }}-${{ runner.os }}
 
     - name: Build raw image
