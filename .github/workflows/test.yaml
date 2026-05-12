@@ -16,16 +16,36 @@ jobs:
       - name: Checkout action
         uses: actions/checkout@v4
 
-      - name: Build kernel and image
-        uses: ./
-        id: build
+      - name: Cache kernel source
+        uses: actions/cache@v4
+        id: kernel-cache
         with:
-          kernel_branch: "v7.0.4"
-          custom_label: "test"
-          kernel_config: "test-kernel-extra.config"
+          path: linux
+          key: kernel-stable-v7.0.4
+
+      - name: Clone kernel source
+        if: steps.kernel-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          git clone --depth 1 --branch "v7.0.4" \
+            "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git" linux
+
+      - name: Build kernel
+        uses: ./kernel-build
+        id: kernel
+        with:
+          kernel_src: ${{ github.workspace }}/linux
+          kernel_config: ${{ github.workspace }}/test-kernel-extra.config
           kernel_config_extra: |
             # CONFIG_EFI_SBAT_FILE is not set
             # CONFIG_DEBUG_INFO is not set
+          custom_label: "test"
+
+      - name: Build image
+        uses: ./
+        id: build
+        with:
+          kernel_dir: ${{ steps.kernel.outputs.kernel_dir }}
 
       - name: Verify output
         run: |

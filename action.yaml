@@ -1,23 +1,10 @@
-name: Kernel and distro image builder
-description: Build kernel from source and package in distro image
+name: Distro image packager
+description: Package pre-built kernel artifacts into a distro image using mkosi
 
 inputs:
-  kernel_git_url:
-    description: Git URL for kernel source
-    required: false
-    default: "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git"
-  kernel_branch:
-    description: Kernel git branch/tag to build
-    required: false
-    default: "v7.0.4"
-  kernel_config:
-    description: Path to kernel config fragment merged on top of the base config (relative to workspace)
-    required: false
-    default: ""
-  kernel_config_extra:
-    description: Inline kernel config options (highest priority, merged last). One CONFIG_* per line.
-    required: false
-    default: ""
+  kernel_dir:
+    description: Path to the kernel install directory containing boot/ and lib/modules/
+    required: true
   distro:
     description: Distribution base
     required: false
@@ -26,10 +13,6 @@ inputs:
     description: Base filename for output image (without extension)
     required: false
     default: "image"
-  custom_label:
-    description: Custom label appended to the kernel version string
-    required: false
-    default: ""
   extra_packages:
     description: Additional packages to install in the image (space-separated)
     required: false
@@ -43,93 +26,10 @@ outputs:
 runs:
   using: "composite"
   steps:
-    - name: Cache kernel source
-      uses: actions/cache@v4
-      id: kernel-cache
-      with:
-        path: linux
-        key: kernel-${{ inputs.kernel_git_url }}-${{ inputs.kernel_branch }}
-
-    - name: Install build dependencies
+    - name: Install image build dependencies
       shell: bash
       run: |
-        sudo dnf install -y \
-          kernel-devel gcc make flex bison \
-          openssl-devel elfutils-libelf-devel \
-          bc perl diffutils git \
-          qemu-img jq distribution-gpg-keys
-
-    - name: Clone kernel source
-      if: steps.kernel-cache.outputs.cache-hit != 'true'
-      shell: bash
-      run: |
-        git clone --depth 1 --branch "${{ inputs.kernel_branch }}" \
-          "${{ inputs.kernel_git_url }}" linux
-
-    - name: Build kernel
-      shell: bash
-      working-directory: linux
-      env:
-        KERNEL_CONFIG_EXTRA: ${{ inputs.kernel_config_extra }}
-      run: |
-        # Generate base config
-        CENTOS_CONFIG=$(find /usr/src/kernels -maxdepth 2 -name '.config' -print -quit 2>/dev/null || true)
-        if [[ -z "$CENTOS_CONFIG" ]]; then
-          CENTOS_CONFIG=$(find /usr/src/kernels -maxdepth 2 -name 'Makefile' -print -quit 2>/dev/null || true)
-          if [[ -n "$CENTOS_CONFIG" ]]; then
-            KDIR=$(dirname "$CENTOS_CONFIG")
-            make O=. KCONFIG_ALLCONFIG="$KDIR/.config" alldefconfig 2>/dev/null || \
-              cp "$KDIR/.config" .config 2>/dev/null || true
-          fi
-        else
-          cp "$CENTOS_CONFIG" .config
-        fi
-
-        # Fallback: generate default config if no CentOS config found
-        if [[ ! -f .config ]]; then
-          make defconfig
-        fi
-
-        # Merge user-provided config fragment on top of base config
-        if [[ -n "${{ inputs.kernel_config }}" && -f "${{ github.workspace }}/${{ inputs.kernel_config }}" ]]; then
-          scripts/kconfig/merge_config.sh -m .config "${{ github.workspace }}/${{ inputs.kernel_config }}"
-        fi
-
-        # Merge inline config options (highest priority)
-        if [[ -n "$KERNEL_CONFIG_EXTRA" ]]; then
-          INLINE_FRAGMENT=$(mktemp)
-          trap 'rm -f "$INLINE_FRAGMENT"' EXIT
-          printf '%s\n' "$KERNEL_CONFIG_EXTRA" > "$INLINE_FRAGMENT"
-          scripts/kconfig/merge_config.sh -m .config "$INLINE_FRAGMENT"
-          rm -f "$INLINE_FRAGMENT"
-          trap - EXIT
-        fi
-
-        make olddefconfig
-
-        # Annotate kernel version: {version}-<actor>-<label>-<commit_hash>
-        COMMIT_SHORT="${{ github.sha }}"
-        COMMIT_SHORT="${COMMIT_SHORT:0:7}"
-        LABEL_PARTS="${{ github.actor }}"
-        if [[ -n "${{ inputs.custom_label }}" ]]; then
-          LABEL_PARTS="${LABEL_PARTS}-${{ inputs.custom_label }}"
-        fi
-        LOCALVERSION="-${LABEL_PARTS}-${COMMIT_SHORT}"
-        scripts/config --set-str CONFIG_LOCALVERSION "$LOCALVERSION"
-        make olddefconfig
-
-        # disable build timestamp for reproducible builds and ccache efficiency
-        export KBUILD_BUILD_TIMESTAMP=""
-        make CC="ccache gcc" bzImage -j"$(nproc)"
-        make CC="ccache gcc" modules -j"$(nproc)"
-
-    - name: Install kernel to staging directory
-      shell: bash
-      working-directory: linux
-      run: |
-        mkdir -p "${{ github.workspace }}/kernel-install"
-        make modules_install INSTALL_MOD_PATH="${{ github.workspace }}/kernel-install"
-        make install INSTALL_PATH="${{ github.workspace }}/kernel-install/boot" INSTALLKERNEL=no
+        sudo dnf install -y qemu-img jq distribution-gpg-keys
 
     - name: Cache uv and mkosi
       uses: actions/cache@v4
@@ -157,15 +57,24 @@ runs:
       with:
         path: |
           /var/tmp/mkosi-cache
-          /var/tmp/mkosi-tools
+          /var/tmp/mkosi-imgbuild/mkosi.tools
           /var/tmp/mkosi-pkgcache
         key: mkosi-${{ inputs.distro }}-${{ runner.os }}
 
+    - name: Prepare persistent build directory
+      shell: bash
+      env:
+        MKOSI_BUILD_DIR: /var/tmp/mkosi-imgbuild
+        CONF_SRC: ${{ github.action_path }}/conf
+      run: |
+        mkdir -p "$MKOSI_BUILD_DIR"
+        cp -a "$CONF_SRC"/. "$MKOSI_BUILD_DIR/"
+
     - name: Build raw image
       shell: bash
-      working-directory: ${{ github.action_path }}/conf
+      working-directory: /var/tmp/mkosi-imgbuild
       env:
-        KERNEL_INSTALL_DIR: ${{ github.workspace }}/kernel-install
+        KERNEL_INSTALL_DIR: ${{ inputs.kernel_dir }}
       run: |
         "$HOME/.local/bin/uv" tool run \
           --from git+https://github.com/systemd/mkosi.git#9a28ad20bbea61894ea7b971d318a71f4374cf3b \
@@ -173,12 +82,12 @@ runs:
 
     - name: Resize image
       shell: bash
-      working-directory: ${{ github.action_path }}/conf
+      working-directory: /var/tmp/mkosi-imgbuild
       run: bash "${{ github.action_path }}/resize.sh"
 
     - name: Convert to VHD
       shell: bash
-      working-directory: ${{ github.action_path }}/conf
+      working-directory: /var/tmp/mkosi-imgbuild
       run: |
         qemu-img convert -f raw -o subformat=fixed,force_size -O vpc \
           image.raw \
@@ -188,7 +97,7 @@ runs:
       id: kver
       shell: bash
       run: |
-        KVER=$(basename "$(ls -d "${{ github.workspace }}/kernel-install/lib/modules/"*/)" )
+        KVER=$(basename "$(ls -d "${{ inputs.kernel_dir }}/lib/modules/"*/)" )
         echo "version=$KVER" >> "$GITHUB_OUTPUT"
 
     - name: Upload build artifacts
@@ -197,4 +106,4 @@ runs:
         name: ${{ steps.kver.outputs.version }}
         path: |
           ${{ github.workspace }}/${{ inputs.output_name }}.vhd
-          ${{ github.workspace }}/kernel-install/
+          ${{ inputs.kernel_dir }}/
