@@ -137,6 +137,14 @@ runs:
       shell: bash
       run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
+    - name: Cache mkosi tools and packages
+      uses: actions/cache@v4
+      with:
+        path: |
+          /var/tmp/mkosi-cache
+          /var/tmp/mkosi-tools
+        key: mkosi-${{ inputs.distro }}-${{ runner.os }}
+
     - name: Build raw image
       shell: bash
       working-directory: ${{ github.action_path }}/conf
@@ -159,3 +167,18 @@ runs:
         qemu-img convert -f raw -o subformat=fixed,force_size -O vpc \
           image.raw \
           "${{ github.workspace }}/${{ inputs.output_name }}.vhd"
+
+    - name: Detect kernel version
+      id: kver
+      shell: bash
+      run: |
+        KVER=$(basename "$(ls -d "${{ github.workspace }}/kernel-install/lib/modules/"*/)" )
+        echo "version=$KVER" >> "$GITHUB_OUTPUT"
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.kver.outputs.version }}
+        path: |
+          ${{ github.workspace }}/${{ inputs.output_name }}.vhd
+          ${{ github.workspace }}/kernel-install/
