@@ -2,19 +2,51 @@
 set -euo pipefail
 
 # Install pre-built kernel and modules from /kernel-install (bind-mounted via --build-sources)
-KERNEL_SRC="/kernel-install"
+KERNEL_SRC="/work/src/kernel-install"
 
-if [[ ! -d "$KERNEL_SRC/boot" ]] || [[ ! -d "$KERNEL_SRC/lib/modules" ]]; then
-  echo "ERROR: Pre-built kernel not found at $KERNEL_SRC"
-  echo "Expected $KERNEL_SRC/boot/ and $KERNEL_SRC/lib/modules/"
-  ls -la "$KERNEL_SRC" 2>/dev/null || echo "Directory does not exist"
-  exit 1
+if [[ ! -d "$KERNEL_SRC/lib/modules" ]]; then
+    echo "ERROR: Pre-built kernel not found at $KERNEL_SRC"
+    echo "Expected $KERNEL_SRC/lib/modules/"
+    ls -la "$KERNEL_SRC" 2>/dev/null || echo "Directory does not exist"
+    exit 1
 fi
 
-# Copy kernel image and related files
-mkdir -p "$DESTDIR/boot"
-cp -a "$KERNEL_SRC/boot/"* "$DESTDIR/boot/"
+echo "Contents of $KERNEL_SRC:"
+find "$KERNEL_SRC" -maxdepth 3 -type f | head -30
 
-# Copy modules
-mkdir -p "$DESTDIR/lib/modules"
-cp -a "$KERNEL_SRC/lib/modules/"* "$DESTDIR/lib/modules/"
+# mkosi expects kernels at /usr/lib/modules/$version/vmlinuz
+for MODDIR in "$KERNEL_SRC"/lib/modules/*/; do
+    KVER=$(basename "$MODDIR")
+    DESTMOD="$DESTDIR/usr/lib/modules/$KVER"
+    mkdir -p "$DESTMOD"
+    cp -a "$MODDIR"/* "$DESTMOD/"
+
+    # Place kernel image where mkosi looks for it
+    FOUND_KERNEL=""
+    for candidate in \
+        "$KERNEL_SRC/boot/vmlinuz-$KVER" \
+        "$KERNEL_SRC/boot/vmlinux-$KVER" \
+        "$KERNEL_SRC/boot/vmlinuz" \
+        "$KERNEL_SRC/boot/vmlinux"; do
+        if [[ -f "$candidate" ]]; then
+            FOUND_KERNEL="$candidate"
+            break
+        fi
+    done
+
+    if [[ -z "$FOUND_KERNEL" ]]; then
+        # Try any vmlinuz/vmlinux file in boot
+        FOUND_KERNEL=$(find "$KERNEL_SRC/boot" -maxdepth 1 -name 'vmlinuz*' -o -name 'vmlinux*' | head -1)
+    fi
+
+    if [[ -n "$FOUND_KERNEL" ]]; then
+        echo "Installing kernel $FOUND_KERNEL as $DESTMOD/vmlinuz"
+        cp "$FOUND_KERNEL" "$DESTMOD/vmlinuz"
+    else
+        echo "WARNING: No kernel image found for $KVER"
+        ls -la "$KERNEL_SRC/boot/" 2>/dev/null || true
+    fi
+done
+
+echo "Final layout:"
+find "$DESTDIR" -type f -name 'vmlinuz*' -o -name 'vmlinux*'

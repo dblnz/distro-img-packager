@@ -28,3 +28,49 @@ jobs:
         run: |
           ls -lh "${{ steps.build.outputs.image_path }}"
           qemu-img info "${{ steps.build.outputs.image_path }}"
+
+      - name: Boot image and verify kernel version
+        run: |
+          COMMIT_SHORT=$(echo "${{ github.sha }}" | cut -c1-7)
+          EXPECTED_KVER="7.0.4-${{ github.actor }}-test-${COMMIT_SHORT}"
+          IMAGE="${{ steps.build.outputs.image_path }}"
+          SERIAL_LOG=$(mktemp)
+
+          # Boot the image with QEMU, output serial console to file
+          timeout 120 qemu-system-x86_64 \
+            -m 2048 \
+            -nographic \
+            -serial file:"$SERIAL_LOG" \
+            -drive file="$IMAGE",format=vpc,if=virtio \
+            -enable-kvm \
+            -cpu host \
+            -no-reboot &
+          QEMU_PID=$!
+
+          # Wait for the system to boot (check for login prompt)
+          for i in $(seq 1 60); do
+            if grep -q "login:" "$SERIAL_LOG" 2>/dev/null; then
+              echo "System reached login prompt after ~${i}s"
+              break
+            fi
+            sleep 2
+          done
+
+          # Dump serial log for debugging
+          echo "=== Serial console output ==="
+          cat "$SERIAL_LOG"
+          echo "=== End serial console output ==="
+
+          kill $QEMU_PID 2>/dev/null || true
+          wait $QEMU_PID 2>/dev/null || true
+
+          # Verify kernel version from boot log
+          if grep -q "Linux version ${EXPECTED_KVER}" "$SERIAL_LOG"; then
+            echo "✅ Kernel version ${EXPECTED_KVER} confirmed in boot log"
+          else
+            echo "❌ Expected kernel version ${EXPECTED_KVER} not found in boot log"
+            rm -f "$SERIAL_LOG"
+            exit 1
+          fi
+
+          rm -f "$SERIAL_LOG"
