@@ -32,20 +32,6 @@ runs:
         sudo apt-get update
         sudo apt-get install -y dnf rpm qemu-utils jq distribution-gpg-keys
 
-    - name: Disable AppArmor userns restriction
-      shell: bash
-      run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-
-    - name: Cache uv and mkosi
-      uses: actions/cache@v4
-      id: uv-cache
-      with:
-        path: |
-          ~/.local/bin/uv
-          ~/.local/bin/uvx
-          ~/.local/share/uv
-        key: uv-mkosi-${{ runner.os }}
-
     - name: Install uv
       shell: bash
       run: |
@@ -56,15 +42,6 @@ runs:
     - name: Add uv to PATH
       shell: bash
       run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-
-    - name: Cache mkosi tools and packages
-      uses: actions/cache@v4
-      with:
-        path: |
-          ${{ github.workspace }}/../imgbuild/mkosi.cache
-          ${{ github.workspace }}/../imgbuild/mkosi.tools
-          ${{ github.workspace }}/../imgbuild/mkosi.pkgcache
-        key: mkosi-${{ inputs.distro }}-${{ runner.os }}
 
     - name: Prepare build directory
       shell: bash

@@ -48,7 +48,7 @@ install_deps() {
     sudo apt-get update -qq
     sudo apt-get install -y -qq \
         gcc make flex bison libssl-dev libelf-dev bc perl diffutils git ccache \
-        dnf rpm qemu-utils jq distribution-gpg-keys
+        dnf rpm qemu-utils jq distribution-gpg-keys genisoimage
 }
 
 ensure_kernel_src() {
@@ -173,6 +173,28 @@ verify_image() {
         exit 1
     fi
 
+    # Create cloud-init NoCloud seed ISO with a test user
+    SEED_DIR=$(mktemp -d)
+    SEED_ISO=$(mktemp --suffix=.iso)
+    cat > "$SEED_DIR/meta-data" <<EOF
+instance-id: test-boot
+local-hostname: test-vm
+EOF
+    cat > "$SEED_DIR/user-data" <<'EOF'
+#cloud-config
+users:
+  - name: testuser
+    plain_text_passwd: testpass
+    lock_passwd: false
+    shell: /bin/bash
+runcmd:
+  - echo "UNAME_OUTPUT=$(uname -r)" > /dev/ttyS0
+  - poweroff
+EOF
+    genisoimage -output "$SEED_ISO" -volid cidata -joliet -rock \
+        "$SEED_DIR/user-data" "$SEED_DIR/meta-data" 2>/dev/null
+    rm -rf "$SEED_DIR"
+
     qemu-img convert -f vpc -O raw "$VHD" "$RAW_IMAGE"
 
     COMMIT_SHORT="$(git -C "$SCRIPT_DIR" rev-parse --short=7 HEAD 2>/dev/null || echo "unknown")"
@@ -191,14 +213,15 @@ verify_image() {
         -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
         -drive if=pflash,format=raw,file="$OVMF_VARS" \
         -drive file="$RAW_IMAGE",format=raw,if=virtio \
+        -drive file="$SEED_ISO",format=raw,if=virtio \
         -enable-kvm \
         -cpu host \
         -no-reboot &
     QEMU_PID=$!
 
     for i in $(seq 1 60); do
-        if grep -q "Linux version" "$SERIAL_LOG" 2>/dev/null; then
-            echo "    Kernel booted after ~$((i * 2))s"
+        if grep -q "UNAME_OUTPUT=" "$SERIAL_LOG" 2>/dev/null; then
+            echo "    cloud-init completed after ~$((i * 2))s"
             break
         fi
         sleep 2
@@ -218,6 +241,11 @@ verify_image() {
         BOOT_OK=false
     fi
 
+    if ! grep -q "UNAME_OUTPUT=${EXPECTED_KVER}" "$SERIAL_LOG"; then
+        echo "==> ❌ uname -r did not report expected version ${EXPECTED_KVER}"
+        BOOT_OK=false
+    fi
+
     if grep -q "Freezing execution" "$SERIAL_LOG"; then
         echo "==> ❌ systemd failed to initialize (Freezing execution detected)"
         BOOT_OK=false
@@ -229,13 +257,13 @@ verify_image() {
     fi
 
     if [[ "$BOOT_OK" == "true" ]]; then
-        echo "==> ✅ Kernel version ${EXPECTED_KVER} confirmed, system booted successfully"
+        echo "==> ✅ Kernel version ${EXPECTED_KVER} confirmed via uname -r, system booted successfully"
     else
-        rm -f "$SERIAL_LOG" "$OVMF_VARS" "$RAW_IMAGE"
+        rm -f "$SERIAL_LOG" "$OVMF_VARS" "$RAW_IMAGE" "$SEED_ISO"
         exit 1
     fi
 
-    rm -f "$SERIAL_LOG" "$OVMF_VARS" "$RAW_IMAGE"
+    rm -f "$SERIAL_LOG" "$OVMF_VARS" "$RAW_IMAGE" "$SEED_ISO"
 }
 
 # --- Main ---

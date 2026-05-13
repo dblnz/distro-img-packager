@@ -19,7 +19,7 @@ jobs:
       - name: Install QEMU for boot test
         run: |
           sudo apt-get update
-          sudo apt-get install -y qemu-system-x86 qemu-utils ovmf
+          sudo apt-get install -y qemu-system-x86 qemu-utils ovmf genisoimage
 
       - name: Cache kernel source
         uses: actions/cache@v4
@@ -86,6 +86,28 @@ jobs:
             exit 1
           fi
 
+          # Create cloud-init NoCloud seed ISO with a test user
+          SEED_DIR=$(mktemp -d)
+          SEED_ISO=$(mktemp --suffix=.iso)
+          cat > "$SEED_DIR/meta-data" <<EOF
+          instance-id: test-boot
+          local-hostname: test-vm
+          EOF
+          cat > "$SEED_DIR/user-data" <<'EOF'
+          #cloud-config
+          users:
+            - name: testuser
+              plain_text_passwd: testpass
+              lock_passwd: false
+              shell: /bin/bash
+          runcmd:
+            - echo "UNAME_OUTPUT=$(uname -r)" > /dev/ttyS0
+            - poweroff
+          EOF
+          genisoimage -output "$SEED_ISO" -volid cidata -joliet -rock \
+            "$SEED_DIR/user-data" "$SEED_DIR/meta-data" 2>/dev/null
+          rm -rf "$SEED_DIR"
+
           qemu-img convert -f vpc -O raw "$IMAGE" "$RAW_IMAGE"
 
           timeout 120 qemu-system-x86_64 \
@@ -97,14 +119,15 @@ jobs:
             -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
             -drive if=pflash,format=raw,file="$OVMF_VARS" \
             -drive file="$RAW_IMAGE",format=raw,if=virtio \
+            -drive file="$SEED_ISO",format=raw,if=virtio \
             -enable-kvm \
             -cpu host \
             -no-reboot &
           QEMU_PID=$!
 
           for i in $(seq 1 60); do
-            if grep -q "Linux version" "$SERIAL_LOG" 2>/dev/null; then
-              echo "Kernel booted after ~$((i*2))s"
+            if grep -q "UNAME_OUTPUT=" "$SERIAL_LOG" 2>/dev/null; then
+              echo "cloud-init completed after ~$((i*2))s"
               break
             fi
             sleep 2
@@ -124,6 +147,11 @@ jobs:
             BOOT_OK=false
           fi
 
+          if ! grep -q "UNAME_OUTPUT=${EXPECTED_KVER}" "$SERIAL_LOG"; then
+            echo "==> ❌ uname -r did not report expected version ${EXPECTED_KVER}"
+            BOOT_OK=false
+          fi
+
           if grep -q "Freezing execution" "$SERIAL_LOG"; then
             echo "==> ❌ systemd failed to initialize (Freezing execution detected)"
             BOOT_OK=false
@@ -135,10 +163,10 @@ jobs:
           fi
 
           if [[ "$BOOT_OK" == "true" ]]; then
-            echo "==> ✅ Kernel version ${EXPECTED_KVER} confirmed, system booted successfully"
+            echo "==> ✅ Kernel version ${EXPECTED_KVER} confirmed via uname -r, system booted successfully"
           else
-            rm -f "$SERIAL_LOG" "$OVMF_VARS" "$RAW_IMAGE"
+            rm -f "$SERIAL_LOG" "$OVMF_VARS" "$RAW_IMAGE" "$SEED_ISO"
             exit 1
           fi
 
-          rm -f "$SERIAL_LOG" "$OVMF_VARS" "$RAW_IMAGE"
+          rm -f "$SERIAL_LOG" "$OVMF_VARS" "$RAW_IMAGE" "$SEED_ISO"
