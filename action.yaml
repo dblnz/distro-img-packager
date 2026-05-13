@@ -5,23 +5,18 @@ inputs:
   kernel_dir:
     description: Path to the kernel install directory containing boot/ and lib/modules/
     required: true
-  distro:
-    description: Distribution base
-    required: false
-    default: "centos"
   output_name:
     description: Base filename for output image (without extension)
     required: false
     default: "image"
-  extra_packages:
-    description: Additional packages to install in the image (space-separated)
-    required: false
-    default: ""
 
 outputs:
   image_path:
     description: Path to the generated VHD image file
-    value: ${{ github.workspace }}/${{ inputs.output_name }}.vhd
+    value: ${{ steps.paths.outputs.image_vhd }}
+  image_raw_path:
+    description: Path to the raw disk image
+    value: ${{ steps.paths.outputs.image_raw }}
 
 runs:
   using: "composite"
@@ -75,21 +70,12 @@ runs:
       run: |
         qemu-img convert -f raw -o subformat=fixed,force_size -O vpc \
           image.raw \
-          "${{ github.workspace }}/${{ inputs.output_name }}.vhd"
+          "${{ inputs.output_name }}.vhd"
 
-    - name: Detect kernel version
-      id: kver
+    - name: Resolve output paths
+      id: paths
       shell: bash
       run: |
-        RESOLVED_DIR="$(realpath "${{ inputs.kernel_dir }}")"
-        KVER=$(basename "$(ls -d "$RESOLVED_DIR/lib/modules/"*/)" )
-        echo "version=$KVER" >> "$GITHUB_OUTPUT"
-        echo "kernel_dir=$RESOLVED_DIR" >> "$GITHUB_OUTPUT"
-
-    - name: Upload build artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ steps.kver.outputs.version }}
-        path: |
-          ${{ github.workspace }}/${{ inputs.output_name }}.vhd
-          ${{ steps.kver.outputs.kernel_dir }}/
+        IMGBUILD="$(realpath "${{ github.workspace }}/../imgbuild")"
+        echo "image_raw=$IMGBUILD/image.raw" >> "$GITHUB_OUTPUT"
+        echo "image_vhd=$IMGBUILD/${{ inputs.output_name }}.vhd" >> "$GITHUB_OUTPUT"

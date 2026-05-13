@@ -150,10 +150,9 @@ convert_image() {
 
 verify_image() {
     echo "==> Booting image in QEMU to verify kernel version"
-    VHD="$WORKSPACE/${OUTPUT_NAME}.vhd"
     SERIAL_LOG=$(mktemp)
     OVMF_VARS=$(mktemp)
-    RAW_IMAGE=$(mktemp)
+    BOOT_IMAGE=$(mktemp)
 
     OVMF_CODE=""
     for f in /usr/share/OVMF/OVMF_CODE_4M.fd /usr/share/OVMF/OVMF_CODE.fd; do
@@ -195,7 +194,8 @@ EOF
         "$SEED_DIR/user-data" "$SEED_DIR/meta-data" 2>/dev/null
     rm -rf "$SEED_DIR"
 
-    qemu-img convert -f vpc -O raw "$VHD" "$RAW_IMAGE"
+    # Copy raw image to avoid modifying the build output
+    cp "$WORKSPACE/image.raw" "$BOOT_IMAGE"
 
     COMMIT_SHORT="$(git -C "$SCRIPT_DIR" rev-parse --short=7 HEAD 2>/dev/null || echo "unknown")"
     LABEL_PARTS="$LOCALVERSION_LABEL"
@@ -212,7 +212,7 @@ EOF
         -serial file:"$SERIAL_LOG" \
         -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
         -drive if=pflash,format=raw,file="$OVMF_VARS" \
-        -drive file="$RAW_IMAGE",format=raw,if=virtio \
+        -drive file="$BOOT_IMAGE",format=raw,if=virtio \
         -drive file="$SEED_ISO",format=raw,if=virtio \
         -enable-kvm \
         -cpu host \
@@ -259,11 +259,11 @@ EOF
     if [[ "$BOOT_OK" == "true" ]]; then
         echo "==> ✅ Kernel version ${EXPECTED_KVER} confirmed via uname -r, system booted successfully"
     else
-        rm -f "$SERIAL_LOG" "$OVMF_VARS" "$RAW_IMAGE" "$SEED_ISO"
+        rm -f "$SERIAL_LOG" "$OVMF_VARS" "$BOOT_IMAGE" "$SEED_ISO"
         exit 1
     fi
 
-    rm -f "$SERIAL_LOG" "$OVMF_VARS" "$RAW_IMAGE" "$SEED_ISO"
+    rm -f "$SERIAL_LOG" "$OVMF_VARS" "$BOOT_IMAGE" "$SEED_ISO"
 }
 
 # --- Main ---
