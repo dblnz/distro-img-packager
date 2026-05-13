@@ -21,7 +21,7 @@ inputs:
 outputs:
   kernel_dir:
     description: Path to the kernel install directory containing boot/ and lib/modules/
-    value: ${{ github.workspace }}/../imgbuild/kernel-install
+    value: ${{ steps.kver.outputs.kernel_dir }}
   kernel_version:
     description: Full kernel version string
     value: ${{ steps.kver.outputs.version }}
@@ -97,5 +97,7 @@ runs:
       env:
         KERNEL_INSTALL_DIR: ${{ github.workspace }}/../imgbuild/kernel-install
       run: |
-        KVER=$(basename "$(ls -d "$KERNEL_INSTALL_DIR/lib/modules/"*/)" )
+        RESOLVED_DIR="$(realpath "$KERNEL_INSTALL_DIR")"
+        KVER=$(basename "$(ls -d "$RESOLVED_DIR/lib/modules/"*/)" )
         echo "version=$KVER" >> "$GITHUB_OUTPUT"
+        echo "kernel_dir=$RESOLVED_DIR" >> "$GITHUB_OUTPUT"

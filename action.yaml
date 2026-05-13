@@ -104,8 +104,10 @@ runs:
       id: kver
       shell: bash
       run: |
-        KVER=$(basename "$(ls -d "${{ inputs.kernel_dir }}/lib/modules/"*/)" )
+        RESOLVED_DIR="$(realpath "${{ inputs.kernel_dir }}")"
+        KVER=$(basename "$(ls -d "$RESOLVED_DIR/lib/modules/"*/)" )
         echo "version=$KVER" >> "$GITHUB_OUTPUT"
+        echo "kernel_dir=$RESOLVED_DIR" >> "$GITHUB_OUTPUT"
 
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
@@ -113,4 +115,4 @@ runs:
         name: ${{ steps.kver.outputs.version }}
         path: |
           ${{ github.workspace }}/${{ inputs.output_name }}.vhd
-          ${{ inputs.kernel_dir }}/
+          ${{ steps.kver.outputs.kernel_dir }}/
