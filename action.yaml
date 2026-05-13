@@ -88,6 +88,8 @@ runs:
     - name: Resize image
       shell: bash
       working-directory: ${{ github.workspace }}/../imgbuild
+      env:
+        RAW_IMAGE: image.raw
       run: bash "${{ github.action_path }}/resize.sh"
 
     - name: Convert to VHD

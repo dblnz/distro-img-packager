@@ -19,7 +19,7 @@ jobs:
       - name: Install QEMU for boot test
         run: |
           sudo apt-get update
-          sudo apt-get install -y qemu-system-x86 qemu-utils
+          sudo apt-get install -y qemu-system-x86 qemu-utils ovmf
 
       - name: Cache kernel source
         uses: actions/cache@v4
@@ -64,42 +64,81 @@ jobs:
           EXPECTED_KVER="7.0.4-${{ github.actor }}-test-${COMMIT_SHORT}"
           IMAGE="${{ steps.build.outputs.image_path }}"
           SERIAL_LOG=$(mktemp)
+          OVMF_VARS=$(mktemp)
+          RAW_IMAGE=$(mktemp)
 
-          # Boot the image with QEMU, output serial console to file
+          # Discover OVMF firmware
+          OVMF_CODE=""
+          for f in /usr/share/OVMF/OVMF_CODE_4M.fd /usr/share/OVMF/OVMF_CODE.fd; do
+            if [[ -f "$f" ]]; then
+              OVMF_CODE="$f"
+              break
+            fi
+          done
+          for f in /usr/share/OVMF/OVMF_VARS_4M.fd /usr/share/OVMF/OVMF_VARS.fd; do
+            if [[ -f "$f" ]]; then
+              cp "$f" "$OVMF_VARS"
+              break
+            fi
+          done
+          if [[ -z "$OVMF_CODE" ]]; then
+            echo "ERROR: OVMF firmware not found"
+            exit 1
+          fi
+
+          qemu-img convert -f vpc -O raw "$IMAGE" "$RAW_IMAGE"
+
           timeout 120 qemu-system-x86_64 \
+            -machine q35 \
             -m 2048 \
-            -nographic \
+            -display none \
+            -monitor none \
             -serial file:"$SERIAL_LOG" \
-            -drive file="$IMAGE",format=vpc,if=virtio \
+            -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
+            -drive if=pflash,format=raw,file="$OVMF_VARS" \
+            -drive file="$RAW_IMAGE",format=raw,if=virtio \
             -enable-kvm \
             -cpu host \
             -no-reboot &
           QEMU_PID=$!
 
-          # Wait for the system to boot (check for login prompt)
           for i in $(seq 1 60); do
-            if grep -q "login:" "$SERIAL_LOG" 2>/dev/null; then
-              echo "System reached login prompt after ~${i}s"
+            if grep -q "Linux version" "$SERIAL_LOG" 2>/dev/null; then
+              echo "Kernel booted after ~$((i*2))s"
               break
             fi
             sleep 2
           done
 
-          # Dump serial log for debugging
+          sleep 5
+          kill $QEMU_PID 2>/dev/null || true
+          wait $QEMU_PID 2>/dev/null || true
+
           echo "=== Serial console output ==="
           cat "$SERIAL_LOG"
           echo "=== End serial console output ==="
 
-          kill $QEMU_PID 2>/dev/null || true
-          wait $QEMU_PID 2>/dev/null || true
+          BOOT_OK=true
+          if ! grep -q "Linux version ${EXPECTED_KVER}" "$SERIAL_LOG"; then
+            echo "==> ❌ Expected kernel version ${EXPECTED_KVER} not found in boot log"
+            BOOT_OK=false
+          fi
 
-          # Verify kernel version from boot log
-          if grep -q "Linux version ${EXPECTED_KVER}" "$SERIAL_LOG"; then
-            echo "✅ Kernel version ${EXPECTED_KVER} confirmed in boot log"
+          if grep -q "Freezing execution" "$SERIAL_LOG"; then
+            echo "==> ❌ systemd failed to initialize (Freezing execution detected)"
+            BOOT_OK=false
+          fi
+
+          if grep -q "Failed to allocate manager object" "$SERIAL_LOG"; then
+            echo "==> ❌ systemd failed to allocate manager object"
+            BOOT_OK=false
+          fi
+
+          if [[ "$BOOT_OK" == "true" ]]; then
+            echo "==> ✅ Kernel version ${EXPECTED_KVER} confirmed, system booted successfully"
           else
-            echo "❌ Expected kernel version ${EXPECTED_KVER} not found in boot log"
-            rm -f "$SERIAL_LOG"
+            rm -f "$SERIAL_LOG" "$OVMF_VARS" "$RAW_IMAGE"
             exit 1
           fi
 
-          rm -f "$SERIAL_LOG"
+          rm -f "$SERIAL_LOG" "$OVMF_VARS" "$RAW_IMAGE"

@@ -21,7 +21,7 @@ inputs:
 outputs:
   kernel_dir:
     description: Path to the kernel install directory containing boot/ and lib/modules/
-    value: ${{ github.workspace }}/kernel-install
+    value: ${{ github.workspace }}/../imgbuild/kernel-install
   kernel_version:
     description: Full kernel version string
     value: ${{ steps.kver.outputs.version }}
@@ -83,15 +83,19 @@ runs:
     - name: Install kernel to staging directory
       shell: bash
       working-directory: ${{ inputs.kernel_src }}
+      env:
+        KERNEL_INSTALL_DIR: ${{ github.workspace }}/../imgbuild/kernel-install
       run: |
-        rm -rf "${{ github.workspace }}/kernel-install"
-        mkdir -p "${{ github.workspace }}/kernel-install"
-        make modules_install INSTALL_MOD_PATH="${{ github.workspace }}/kernel-install"
-        make install INSTALL_PATH="${{ github.workspace }}/kernel-install/boot" INSTALLKERNEL=no
+        rm -rf "$KERNEL_INSTALL_DIR"
+        mkdir -p "$KERNEL_INSTALL_DIR"
+        make modules_install INSTALL_MOD_PATH="$KERNEL_INSTALL_DIR"
+        make install INSTALL_PATH="$KERNEL_INSTALL_DIR/boot" INSTALLKERNEL=no
 
     - name: Detect kernel version
       id: kver
       shell: bash
+      env:
+        KERNEL_INSTALL_DIR: ${{ github.workspace }}/../imgbuild/kernel-install
       run: |
-        KVER=$(basename "$(ls -d "${{ github.workspace }}/kernel-install/lib/modules/"*/)" )
+        KVER=$(basename "$(ls -d "$KERNEL_INSTALL_DIR/lib/modules/"*/)" )
         echo "version=$KVER" >> "$GITHUB_OUTPUT"
