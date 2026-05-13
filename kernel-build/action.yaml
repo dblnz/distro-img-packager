@@ -5,6 +5,10 @@ inputs:
   kernel_src:
     description: Path to a directory containing the kernel source tree
     required: true
+  kernel_base_config:
+    description: Path to a full kernel .config used as the base (defaults to bundled config-6.12.0-226.el10.x86_64)
+    required: false
+    default: ""
   kernel_config:
     description: Path to kernel config fragment merged on top of the base config
     required: false
@@ -44,8 +48,17 @@ runs:
       env:
         KERNEL_CONFIG_EXTRA: ${{ inputs.kernel_config_extra }}
       run: |
-        # Generate minimal base config
-        make defconfig
+        # Use bundled distro config as base, or a user-provided base config
+        BASE_CONFIG="${{ inputs.kernel_base_config }}"
+        if [[ -z "$BASE_CONFIG" ]]; then
+          BASE_CONFIG="${GITHUB_ACTION_PATH}/../config-6.12.0-226.el10.x86_64"
+        fi
+        if [[ ! -f "$BASE_CONFIG" ]]; then
+          echo "ERROR: Base kernel config not found at $BASE_CONFIG"
+          exit 1
+        fi
+        echo "Using base config: $BASE_CONFIG"
+        cp "$BASE_CONFIG" .config
 
         # Merge user-provided config fragment on top of base config
         if [[ -n "${{ inputs.kernel_config }}" && -f "${{ inputs.kernel_config }}" ]]; then

@@ -7,6 +7,7 @@ WORKSPACE="${SCRIPT_DIR}/../imgbuild"
 
 KERNEL_VERSION="${KERNEL_VERSION:-7.0.4}"
 KERNEL_SRC="${KERNEL_SRC:-${WORKSPACE}/linux}"
+KERNEL_BASE_CONFIG="${KERNEL_BASE_CONFIG:-${SCRIPT_DIR}/config-6.12.0-226.el10.x86_64}"
 KERNEL_CONFIG="${KERNEL_CONFIG:-${SCRIPT_DIR}/test-kernel-extra.config}"
 KERNEL_CONFIG_EXTRA="${KERNEL_CONFIG_EXTRA:-$(
     cat <<'KCONF'
@@ -37,8 +38,8 @@ Workspace: $WORKSPACE
 Kernel source: $KERNEL_SRC (cloned from kernel.org v$KERNEL_VERSION if missing)
 
 Override defaults with environment variables:
-  KERNEL_SRC, KERNEL_VERSION, KERNEL_CONFIG, KERNEL_CONFIG_EXTRA,
-  CUSTOM_LABEL, LOCALVERSION_LABEL, OUTPUT_NAME
+  KERNEL_SRC, KERNEL_VERSION, KERNEL_BASE_CONFIG, KERNEL_CONFIG,
+  KERNEL_CONFIG_EXTRA, CUSTOM_LABEL, LOCALVERSION_LABEL, OUTPUT_NAME
 EOF
     exit 1
 }
@@ -66,7 +67,12 @@ build_kernel() {
     echo "==> Building kernel from $KERNEL_SRC"
     pushd "$KERNEL_SRC" >/dev/null
 
-    make defconfig
+    if [[ ! -f "$KERNEL_BASE_CONFIG" ]]; then
+        echo "ERROR: Base kernel config not found at $KERNEL_BASE_CONFIG"
+        exit 1
+    fi
+    echo "    Using base config: $KERNEL_BASE_CONFIG"
+    cp "$KERNEL_BASE_CONFIG" .config
 
     if [[ -n "$KERNEL_CONFIG" && -f "$KERNEL_CONFIG" ]]; then
         echo "    Merging config fragment: $KERNEL_CONFIG"
