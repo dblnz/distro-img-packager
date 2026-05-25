@@ -43,7 +43,10 @@ jobs:
           kernel_config: ${{ github.workspace }}/test-kernel-extra.config
           kernel_config_extra: |
             # CONFIG_EFI_SBAT_FILE is not set
-            # CONFIG_DEBUG_INFO is not set
+            CONFIG_DEBUG_INFO_NONE=y
+            # CONFIG_DEBUG_INFO_DWARF_TOOLCHAIN_DEFAULT is not set
+            # CONFIG_DEBUG_INFO_BTF is not set
+            # CONFIG_DEBUG_INFO_BTF_MODULES is not set
             CONFIG_XFS_FS=y
           custom_label: "test"
 
