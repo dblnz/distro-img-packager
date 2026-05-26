@@ -34,9 +34,6 @@ runs:
           curl -LsSf https://astral.sh/uv/install.sh | sh
         fi
 
-    - name: Add uv to PATH
-      shell: bash
-      run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
     - name: Prepare build directory
       shell: bash
@@ -67,15 +64,20 @@ runs:
     - name: Convert to VHD
       shell: bash
       working-directory: ${{ github.workspace }}/../imgbuild
+      env:
+        OUTPUT_NAME: ${{ inputs.output_name }}
       run: |
         qemu-img convert -f raw -o subformat=fixed,force_size -O vpc \
           image.raw \
-          "${{ inputs.output_name }}.vhd"
+          "$OUTPUT_NAME.vhd"
 
     - name: Resolve output paths
       id: paths
       shell: bash
+      env:
+        OUTPUT_NAME: ${{ inputs.output_name }}
+        WORKSPACE: ${{ github.workspace }}
       run: |
-        IMGBUILD="$(realpath "${{ github.workspace }}/../imgbuild")"
+        IMGBUILD="$(realpath "$WORKSPACE/../imgbuild")"
         echo "image_raw=$IMGBUILD/image.raw" >> "$GITHUB_OUTPUT"
-        echo "image_vhd=$IMGBUILD/${{ inputs.output_name }}.vhd" >> "$GITHUB_OUTPUT"
+        echo "image_vhd=$IMGBUILD/$OUTPUT_NAME.vhd" >> "$GITHUB_OUTPUT"

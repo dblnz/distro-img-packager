@@ -47,9 +47,14 @@ runs:
       working-directory: ${{ inputs.kernel_src }}
       env:
         KERNEL_CONFIG_EXTRA: ${{ inputs.kernel_config_extra }}
+        INPUT_KERNEL_BASE_CONFIG: ${{ inputs.kernel_base_config }}
+        INPUT_KERNEL_CONFIG: ${{ inputs.kernel_config }}
+        INPUT_CUSTOM_LABEL: ${{ inputs.custom_label }}
+        GH_ACTOR: ${{ github.actor }}
+        GH_SHA: ${{ github.sha }}
       run: |
         # Use bundled distro config as base, or a user-provided base config
-        BASE_CONFIG="${{ inputs.kernel_base_config }}"
+        BASE_CONFIG="$INPUT_KERNEL_BASE_CONFIG"
         if [[ -z "$BASE_CONFIG" ]]; then
           BASE_CONFIG="${GITHUB_ACTION_PATH}/../config-6.12.0-226.el10.x86_64"
         fi
@@ -61,8 +66,8 @@ runs:
         cp "$BASE_CONFIG" .config
 
         # Merge user-provided config fragment on top of base config
-        if [[ -n "${{ inputs.kernel_config }}" && -f "${{ inputs.kernel_config }}" ]]; then
-          scripts/kconfig/merge_config.sh -m .config "${{ inputs.kernel_config }}"
+        if [[ -n "$INPUT_KERNEL_CONFIG" && -f "$INPUT_KERNEL_CONFIG" ]]; then
+          scripts/kconfig/merge_config.sh -m .config "$INPUT_KERNEL_CONFIG"
         fi
 
         # Merge inline config options (highest priority)
@@ -78,11 +83,10 @@ runs:
         make olddefconfig
 
         # Annotate kernel version: {version}-<actor>-<label>-<commit_hash>
-        COMMIT_SHORT="${{ github.sha }}"
-        COMMIT_SHORT="${COMMIT_SHORT:0:7}"
-        LABEL_PARTS="${{ github.actor }}"
-        if [[ -n "${{ inputs.custom_label }}" ]]; then
-          LABEL_PARTS="${LABEL_PARTS}-${{ inputs.custom_label }}"
+        COMMIT_SHORT="${GH_SHA:0:7}"
+        LABEL_PARTS="$GH_ACTOR"
+        if [[ -n "$INPUT_CUSTOM_LABEL" ]]; then
+          LABEL_PARTS="${LABEL_PARTS}-${INPUT_CUSTOM_LABEL}"
         fi
         LOCALVERSION="-${LABEL_PARTS}-${COMMIT_SHORT}"
         scripts/config --set-str CONFIG_LOCALVERSION "$LOCALVERSION"
